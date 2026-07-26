@@ -221,11 +221,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             textColor = .secondaryLabelColor
         case .running(.focus, _):
             title = ""
-            iconColor = .white
+            iconColor = .systemRed
             textColor = .systemRed
         case let .running(.rest, endDate):
             title = Self.formatRemaining(until: endDate)
-            iconColor = .white
+            iconColor = .systemGreen
             textColor = .systemGreen
         }
 

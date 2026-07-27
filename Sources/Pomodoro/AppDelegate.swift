@@ -1,4 +1,5 @@
 import AppKit
+import AudioToolbox
 import Carbon
 import UserNotifications
 
@@ -11,13 +12,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var hotKeyManager: HotKeyManager?
     private var window: NSWindow?
     private var hotKeySummary = "Hotkeys: registering..."
+    private var endSound: NSSound?
+    private var notificationAuthorizationRequested = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         ProcessInfo.processInfo.disableAutomaticTermination("Pomodoro menu bar timer is active")
 
         UNUserNotificationCenter.current().delegate = self
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+        requestNotificationPermission()
 
         configureWindow()
         configureMenu()
@@ -249,7 +252,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func notifySessionEnded(_ kind: PomodoroSession.Kind) {
-        NSSound.beep()
+        playSessionEndedSound()
+        NSApp.requestUserAttention(.criticalRequest)
 
         let content = UNMutableNotificationContent()
         content.title = kind == .focus ? "Focus session complete" : "Rest session complete"
@@ -262,6 +266,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             trigger: nil
         )
         UNUserNotificationCenter.current().add(request)
+    }
+
+    private func requestNotificationPermission() {
+        guard !notificationAuthorizationRequested else {
+            return
+        }
+
+        notificationAuthorizationRequested = true
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+    }
+
+    private func playSessionEndedSound() {
+        AudioServicesPlayAlertSound(SystemSoundID(kSystemSoundID_UserPreferredAlert))
+
+        if let sound = NSSound(named: NSSound.Name("Glass")) {
+            sound.volume = 1
+            sound.currentTime = 0
+            sound.play()
+            endSound = sound
+        } else {
+            NSSound.beep()
+        }
     }
 
     private static func formatRemaining(until endDate: Date) -> String {

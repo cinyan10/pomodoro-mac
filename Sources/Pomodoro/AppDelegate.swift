@@ -1,9 +1,23 @@
 import AppKit
-import AudioToolbox
 import Carbon
 import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+    private enum SessionEndSound: String, CaseIterable {
+        case ping = "Ping"
+        case tink = "Tink"
+        case pop = "Pop"
+        case basso = "Basso"
+        case sosumi = "Sosumi"
+        case glass = "Glass"
+        case funk = "Funk"
+        case hero = "Hero"
+        case submarine = "Submarine"
+
+        var title: String { rawValue }
+    }
+
+    private static let sessionEndSoundDefaultsKey = "sessionEndSound"
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let statusLabel = NSTextField(labelWithString: "Pomodoro: Idle")
     private let hotKeyLabel = NSTextField(labelWithString: "Hotkeys: registering...")
@@ -13,7 +27,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var window: NSWindow?
     private var hotKeySummary = "Hotkeys: registering..."
     private var endSound: NSSound?
+    private var sessionEndSound: SessionEndSound
     private var notificationAuthorizationRequested = false
+
+    override init() {
+        sessionEndSound = Self.loadSessionEndSound()
+        super.init()
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -123,6 +143,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
         menu.addItem(NSMenuItem(title: detailTitle, action: nil, keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: hotKeySummary, action: nil, keyEquivalent: ""))
+        menu.addItem(NSMenuItem.separator())
+
+        let soundMenuItem = NSMenuItem(title: "Session Sound", action: nil, keyEquivalent: "")
+        let soundMenu = NSMenu(title: "Session Sound")
+        for sound in SessionEndSound.allCases {
+            let item = NSMenuItem(title: sound.title, action: #selector(selectSessionSoundFromMenu(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = sound.rawValue
+            item.state = sound == sessionEndSound ? .on : .off
+            soundMenu.addItem(item)
+        }
+        soundMenu.addItem(NSMenuItem.separator())
+        let previewItem = NSMenuItem(title: "Preview Current Sound", action: #selector(previewSessionSoundFromMenu), keyEquivalent: "")
+        previewItem.target = self
+        soundMenu.addItem(previewItem)
+        soundMenuItem.submenu = soundMenu
+        menu.addItem(soundMenuItem)
+
         menu.addItem(NSMenuItem.separator())
 
         let showItem = NSMenuItem(title: "Show Pomodoro", action: #selector(showWindowFromMenu), keyEquivalent: "")
@@ -258,7 +296,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let content = UNMutableNotificationContent()
         content.title = kind == .focus ? "Focus session complete" : "Rest session complete"
         content.body = kind == .focus ? "Time for a 5-minute rest." : "Ready for another focus session."
-        content.sound = .default
+        content.sound = nil
 
         let request = UNNotificationRequest(
             identifier: "pomodoro-\(UUID().uuidString)",
@@ -278,16 +316,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func playSessionEndedSound() {
-        AudioServicesPlayAlertSound(SystemSoundID(kSystemSoundID_UserPreferredAlert))
+        play(sound: sessionEndSound)
+    }
 
-        if let sound = NSSound(named: NSSound.Name("Glass")) {
-            sound.volume = 1
-            sound.currentTime = 0
-            sound.play()
-            endSound = sound
-        } else {
+    private func play(sound: SessionEndSound) {
+        guard let sound = NSSound(named: NSSound.Name(sound.rawValue)) else {
             NSSound.beep()
+            return
         }
+
+        sound.volume = 1
+        sound.currentTime = 0
+        sound.play()
+        endSound = sound
+    }
+
+    private static func loadSessionEndSound() -> SessionEndSound {
+        guard
+            let rawValue = UserDefaults.standard.string(forKey: sessionEndSoundDefaultsKey),
+            let sound = SessionEndSound(rawValue: rawValue)
+        else {
+            return .ping
+        }
+
+        return sound
     }
 
     private static func formatRemaining(until endDate: Date) -> String {
@@ -341,6 +393,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @objc private func stopSessionFromMenu() {
         stopSession()
+    }
+
+    @objc private func selectSessionSoundFromMenu(_ sender: NSMenuItem) {
+        guard
+            let rawValue = sender.representedObject as? String,
+            let sound = SessionEndSound(rawValue: rawValue)
+        else {
+            return
+        }
+
+        sessionEndSound = sound
+        UserDefaults.standard.set(sound.rawValue, forKey: Self.sessionEndSoundDefaultsKey)
+        configureMenu()
+    }
+
+    @objc private func previewSessionSoundFromMenu() {
+        play(sound: sessionEndSound)
     }
 
     @objc private func showWindowFromMenu() {

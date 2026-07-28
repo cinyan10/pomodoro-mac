@@ -32,6 +32,7 @@ open dist/Pomodoro.app
 - `Control + F17`: start a 5-minute rest session.
 - `Control + F18`: stop the active session.
 - Click the menu bar item to see the detailed timer and quit.
+- Choose and preview a session-end sound from the menu bar item's `Session Sound` submenu.
 - Use the app window buttons if macOS or a keyboard utility captures a shortcut.
 
-Focus mode shows a white timer icon without focus time in the menu bar. Rest mode shows a white timer icon with green rest time remaining. When a timer ends, the app plays the default system sound and posts a macOS notification.
+Focus mode shows a white timer icon without focus time in the menu bar. Rest mode shows a white timer icon with green rest time remaining. When a timer ends, the app plays the selected session sound and posts a macOS notification.

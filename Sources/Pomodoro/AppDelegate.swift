@@ -2,8 +2,47 @@ import AppKit
 import Carbon
 import UserNotifications
 
+private final class AlarmPopoverViewController: NSViewController {
+    private let messageLabel = NSTextField(labelWithString: "Timer complete")
+    private let onStop: () -> Void
+
+    init(onStop: @escaping () -> Void) {
+        self.onStop = onStop
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        messageLabel.alignment = .center
+        messageLabel.font = NSFont.systemFont(ofSize: 20, weight: .semibold)
+
+        let stopButton = NSButton(title: "Stop Alarm", target: self, action: #selector(stopAlarm))
+        stopButton.keyEquivalent = "\r"
+
+        let stack = NSStackView(views: [messageLabel, stopButton])
+        stack.orientation = .vertical
+        stack.alignment = .centerX
+        stack.spacing = 18
+        stack.edgeInsets = NSEdgeInsets(top: 28, left: 28, bottom: 28, right: 28)
+        view = stack
+    }
+
+    func update(kind: PomodoroSession.Kind) {
+        messageLabel.stringValue = kind == .focus ? "Focus session complete" : "Rest session complete"
+    }
+
+    @objc private func stopAlarm() {
+        onStop()
+    }
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private enum SessionEndSound: String, CaseIterable {
+        case radial = "Radial"
         case ping = "Ping"
         case tink = "Tink"
         case pop = "Pop"
@@ -14,10 +53,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         case hero = "Hero"
         case submarine = "Submarine"
 
-        var title: String { rawValue }
+        var title: String {
+            self == .radial ? "Radial (Default)" : rawValue
+        }
     }
 
     private static let sessionEndSoundDefaultsKey = "sessionEndSound"
+    private static let clockRadialSoundURL = URL(fileURLWithPath:
+        "/System/Library/PrivateFrameworks/ToneLibrary.framework/Versions/A/Resources/Ringtones/Radial-EncoreInfinitum.m4r"
+    )
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let statusLabel = NSTextField(labelWithString: "Pomodoro: Idle")
     private let hotKeyLabel = NSTextField(labelWithString: "Hotkeys: registering...")
@@ -25,8 +69,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var tickTimer: Timer?
     private var hotKeyManager: HotKeyManager?
     private var window: NSWindow?
+    private var alarmPopover: NSPopover?
     private var hotKeySummary = "Hotkeys: registering..."
     private var endSound: NSSound?
+    private var alarmRinging = false
     private var sessionEndSound: SessionEndSound
     private var notificationAuthorizationRequested = false
 
@@ -71,6 +117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     func applicationWillTerminate(_ notification: Notification) {
         hotKeyManager?.unregister()
         tickTimer?.invalidate()
+        stopAlarm()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -83,10 +130,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound])
+        // `notifySessionEnded` already plays the selected NSSound while the
+        // app is active. Do not play a second notification sound in frontmost
+        // mode; the notification's default sound is still used in background.
+        completionHandler([.banner])
     }
 
     private func startSession(_ kind: PomodoroSession.Kind) {
+        stopAlarm()
         let duration: TimeInterval
         switch kind {
         case .focus:
@@ -103,6 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func stopSession() {
+        stopAlarm()
         session = .idle
         tickTimer?.invalidate()
         tickTimer = nil
@@ -158,6 +210,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let previewItem = NSMenuItem(title: "Preview Current Sound", action: #selector(previewSessionSoundFromMenu), keyEquivalent: "")
         previewItem.target = self
         soundMenu.addItem(previewItem)
+        let testAlarmItem = NSMenuItem(title: "Test Alarm (3 Seconds)", action: #selector(testAlarmFromMenu), keyEquivalent: "")
+        testAlarmItem.target = self
+        soundMenu.addItem(testAlarmItem)
         soundMenuItem.submenu = soundMenu
         menu.addItem(soundMenuItem)
 
@@ -181,6 +236,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         stopItem.target = self
         stopItem.isEnabled = session.isRunning
         menu.addItem(stopItem)
+
+        let stopAlarmItem = NSMenuItem(title: "Stop Alarm", action: #selector(stopAlarmFromMenu), keyEquivalent: "")
+        stopAlarmItem.target = self
+        stopAlarmItem.isEnabled = alarmRinging
+        menu.addItem(stopAlarmItem)
 
         menu.addItem(NSMenuItem.separator())
 
@@ -290,12 +350,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func notifySessionEnded(_ kind: PomodoroSession.Kind) {
-        playSessionEndedSound()
+        switch kind {
+        case .focus:
+            // Focus sessions use a single short notification tone.
+            stopAlarm()
+            play(sound: .ping)
+        case .rest:
+            // Rest sessions use the persistent Clock-style alarm.
+            startAlarm()
+            showAlarmPopover(kind: kind)
+        }
         NSApp.requestUserAttention(.criticalRequest)
 
         let content = UNMutableNotificationContent()
         content.title = kind == .focus ? "Focus session complete" : "Rest session complete"
         content.body = kind == .focus ? "Time for a 5-minute rest." : "Ready for another focus session."
+        // The looping NSSound below is the alarm. The notification provides
+        // a visible reminder without adding a second, non-looping sound.
         content.sound = nil
 
         let request = UNNotificationRequest(
@@ -319,8 +390,56 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         play(sound: sessionEndSound)
     }
 
+    private func startAlarm() {
+        stopAlarm()
+        alarmRinging = true
+        guard let sound = makeSound(for: sessionEndSound) else {
+            NSSound.beep()
+            configureMenu()
+            return
+        }
+
+        sound.volume = 1
+        sound.currentTime = 0
+        sound.loops = true
+        sound.play()
+        endSound = sound
+        configureMenu()
+    }
+
+    private func stopAlarm() {
+        endSound?.stop()
+        endSound = nil
+        alarmPopover?.performClose(nil)
+        if alarmRinging {
+            alarmRinging = false
+            configureMenu()
+        }
+    }
+
+    private func showAlarmPopover(kind: PomodoroSession.Kind) {
+        guard let button = statusItem.button else {
+            return
+        }
+
+        if alarmPopover == nil {
+            let popover = NSPopover()
+            popover.behavior = .applicationDefined
+            popover.animates = true
+            popover.contentSize = NSSize(width: 300, height: 130)
+            popover.contentViewController = AlarmPopoverViewController { [weak self] in
+                self?.stopAlarm()
+            }
+            alarmPopover = popover
+        }
+
+        (alarmPopover?.contentViewController as? AlarmPopoverViewController)?.update(kind: kind)
+        alarmPopover?.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     private func play(sound: SessionEndSound) {
-        guard let sound = NSSound(named: NSSound.Name(sound.rawValue)) else {
+        guard let sound = makeSound(for: sound) else {
             NSSound.beep()
             return
         }
@@ -331,12 +450,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         endSound = sound
     }
 
+    private func makeSound(for sound: SessionEndSound) -> NSSound? {
+        if sound == .radial,
+           let radialSound = NSSound(contentsOf: Self.clockRadialSoundURL, byReference: true) {
+            return radialSound
+        }
+
+        return NSSound(named: NSSound.Name(sound.rawValue))
+    }
+
     private static func loadSessionEndSound() -> SessionEndSound {
         guard
             let rawValue = UserDefaults.standard.string(forKey: sessionEndSoundDefaultsKey),
             let sound = SessionEndSound(rawValue: rawValue)
         else {
-            return .ping
+            return .radial
         }
 
         return sound
@@ -395,6 +523,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         stopSession()
     }
 
+    @objc private func stopAlarmFromMenu() {
+        stopAlarm()
+    }
+
     @objc private func selectSessionSoundFromMenu(_ sender: NSMenuItem) {
         guard
             let rawValue = sender.representedObject as? String,
@@ -409,7 +541,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     @objc private func previewSessionSoundFromMenu() {
+        stopAlarm()
         play(sound: sessionEndSound)
+    }
+
+    @objc private func testAlarmFromMenu() {
+        session = .running(kind: .rest, endDate: Date().addingTimeInterval(3))
+        startTicking()
+        configureMenu()
+        updateStatusItem()
+        updateWindowStatus()
     }
 
     @objc private func showWindowFromMenu() {

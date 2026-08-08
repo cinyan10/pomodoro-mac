@@ -8,9 +8,9 @@ final class HotKeyManager {
     }
 
     private enum HotKeyID: UInt32 {
-        case focusF16 = 1
-        case restF17 = 2
-        case stopF18 = 3
+        case focusF19 = 1
+        case restF19 = 2
+        case stopF19 = 3
     }
 
     private let handler: (Action) -> Void
@@ -29,9 +29,9 @@ final class HotKeyManager {
         installEventHandler()
 
         return [
-            registerHotKey(id: .focusF16, keyCode: UInt32(kVK_F16), modifiers: UInt32(controlKey), label: "Control-F16"),
-            registerHotKey(id: .restF17, keyCode: UInt32(kVK_F17), modifiers: UInt32(controlKey), label: "Control-F17"),
-            registerHotKey(id: .stopF18, keyCode: UInt32(kVK_F18), modifiers: UInt32(controlKey), label: "Control-F18")
+            registerHotKey(id: .focusF19, keyCode: UInt32(kVK_F19), modifiers: UInt32(controlKey), label: "Control-F19"),
+            registerHotKey(id: .restF19, keyCode: UInt32(kVK_F19), modifiers: UInt32(optionKey), label: "Option-F19"),
+            registerHotKey(id: .stopF19, keyCode: UInt32(kVK_F19), modifiers: UInt32(cmdKey), label: "Command-F19")
         ].compactMap { $0 }
     }
 
@@ -110,11 +110,11 @@ final class HotKeyManager {
         }
 
         switch hotKeyID.id {
-        case HotKeyID.focusF16.rawValue:
+        case HotKeyID.focusF19.rawValue:
             handler(.startFocus)
-        case HotKeyID.restF17.rawValue:
+        case HotKeyID.restF19.rawValue:
             handler(.startRest)
-        case HotKeyID.stopF18.rawValue:
+        case HotKeyID.stopF19.rawValue:
             handler(.stop)
         default:
             break

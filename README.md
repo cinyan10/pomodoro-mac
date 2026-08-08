@@ -28,9 +28,9 @@ open dist/Pomodoro.app
 
 ## Controls
 
-- `Control + F16`: start a 25-minute focus session.
-- `Control + F17`: start a 5-minute rest session.
-- `Control + F18`: stop the active session.
+- `Control + F19`: start a 25-minute focus session.
+- `Option + F19`: start a 5-minute rest session.
+- `Command + F19`: stop the active session.
 - Click the menu bar item to see the detailed timer and quit.
 - Choose and preview a session-end sound from the menu bar item's `Session Sound` submenu.
 - Use the app window buttons if macOS or a keyboard utility captures a shortcut.
